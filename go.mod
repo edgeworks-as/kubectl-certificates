@@ -4,7 +4,7 @@ go 1.21
 
 require (
 	github.com/cert-manager/cert-manager v1.13.3
-	github.com/liggitt/tabwriter v0.0.0-20181228230101-89fcab3d43de
+	github.com/jessevdk/go-flags v1.5.0
 	k8s.io/apimachinery v0.29.0
 	k8s.io/client-go v0.29.0
 )
