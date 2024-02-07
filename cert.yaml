@@ -1,0 +1,11 @@
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: example-certificate3
+spec:
+  dnsNames:
+    - test71.eu
+  issuerRef:
+    kind: ClusterIssuer
+    name: aletsencrypt-prod
+  secretName: example2
