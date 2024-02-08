@@ -5,6 +5,13 @@ package cmd
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
+	"slices"
+	"strings"
+	"text/tabwriter"
+	"time"
+
 	certv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
 	certclient "github.com/cert-manager/cert-manager/pkg/client/clientset/versioned/typed/certmanager/v1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -12,12 +19,6 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/util/homedir"
-	"os"
-	"path/filepath"
-	"slices"
-	"strings"
-	"text/tabwriter"
-	"time"
 
 	"github.com/spf13/cobra"
 
@@ -50,7 +51,7 @@ func init() {
 	listCmd.Flags().BoolVarP(&all, "all", "A", false, "list across all namespaces")
 	listCmd.MarkFlagsMutuallyExclusive("namespace", "all")
 
-	listCmd.Flags().BoolVarP(&sortName, "name", "", true, "sort by name")
+	listCmd.Flags().BoolVarP(&sortName, "name", "", false, "sort by name")
 	listCmd.Flags().BoolVarP(&sortReady, "ready", "", false, "sort by ready-state")
 	listCmd.Flags().BoolVarP(&sortFrom, "from", "", false, "sort by from")
 	listCmd.Flags().BoolVarP(&sortTo, "to", "", false, "sort by to")
@@ -72,10 +73,13 @@ func list() {
 		ns = ""
 	}
 
-	certitems, err := certClient.Certificates(ns).List(context.Background(), v1.ListOptions{})
-	certs := certitems.Items
-	sortCerts(certs, sortName, sortReady, sortIssuer, sortFrom, sortTo)
+	if !(sortName || sortReady || sortFrom || sortTo || sortIssuer) {
+		sortName = true
+	}
 
+	certList, err := certClient.Certificates(ns).List(context.Background(), v1.ListOptions{})
+	certs := certList.Items
+	sortCerts(certs, sortName, sortReady, sortIssuer, sortFrom, sortTo)
 	printCerts(certs)
 }
 
@@ -95,13 +99,19 @@ func printCerts(certs []certv1.Certificate) {
 }
 
 func sortCerts(certList []certv1.Certificate, sortName, sortReady, sortIssuer, sortFrom, sortTo bool) {
-	sortFunc := func(a certv1.Certificate, b certv1.Certificate) int {
-		switch {
-		case sortName:
+	var sortFunc func(a certv1.Certificate, b certv1.Certificate) int
+
+	switch {
+	case sortName:
+		sortFunc = func(a certv1.Certificate, b certv1.Certificate) int {
 			return strings.Compare(a.Name, b.Name)
-		case sortReady:
+		}
+	case sortReady:
+		sortFunc = func(a certv1.Certificate, b certv1.Certificate) int {
 			return strings.Compare(status(a), status(b))
-		case sortFrom:
+		}
+	case sortFrom:
+		sortFunc = func(a certv1.Certificate, b certv1.Certificate) int {
 			if a.Status.NotBefore == nil {
 				return -1
 			} else if b.Status.NotBefore == nil {
@@ -111,7 +121,9 @@ func sortCerts(certList []certv1.Certificate, sortName, sortReady, sortIssuer, s
 			} else {
 				return 1
 			}
-		case sortTo:
+		}
+	case sortTo:
+		sortFunc = func(a certv1.Certificate, b certv1.Certificate) int {
 			if a.Status.NotAfter == nil {
 				return -1
 			} else if b.Status.NotAfter == nil {
@@ -121,10 +133,16 @@ func sortCerts(certList []certv1.Certificate, sortName, sortReady, sortIssuer, s
 			} else {
 				return 1
 			}
-		case sortIssuer:
+		}
+	case sortIssuer:
+		sortFunc = func(a certv1.Certificate, b certv1.Certificate) int {
 			return strings.Compare(a.Spec.IssuerRef.Name, b.Spec.IssuerRef.Name)
 		}
-		return 0
+	}
+
+	if sortFunc == nil {
+		panic("sort func not set")
+		return
 	}
 	slices.SortFunc(certList, sortFunc)
 }
