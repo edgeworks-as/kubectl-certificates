@@ -1,3 +1,4 @@
-# kubectl-listcerts
+# kubectl-certificates
 
-A simple utility to manage certificates handled by cert-manager
+A simple plugin to kubectl to manage certificates handled by cert-manager.
+
