@@ -60,8 +60,8 @@ func init() {
 }
 
 type cert struct {
-	C        certv1.Certificate
-	Comments []string
+	C      certv1.Certificate
+	Issues []string
 }
 
 func list() {
@@ -104,57 +104,71 @@ func list() {
 	printCerts(certs)
 }
 
-func validate(certs []cert, issuerList *certv1.ClusterIssuerList, issuerList2 *certv1.IssuerList) {
+func validate(certs []*cert, clusterIssuersList *certv1.ClusterIssuerList, issuersList *certv1.IssuerList) {
 
-	var clusterIssuers map[string]*certv1.ClusterIssuer
-	var issuers map[string]*certv1.Issuer
+	clusterIssuers := make(map[string]*certv1.ClusterIssuer)
+	issuers := make(map[string]*certv1.Issuer)
 
-	for _, iss := range issuerList {
-		issuers[is]
+	for _, iss := range clusterIssuersList.Items {
+		clusterIssuers[iss.Name] = &iss
+	}
+
+	for _, iss := range issuersList.Items {
+		issuers[iss.Name] = &iss
 	}
 
 	for _, c := range certs {
-
+		switch c.C.Spec.IssuerRef.Kind {
+		case "ClusterIssuer":
+			if _, found := clusterIssuers[c.C.Spec.IssuerRef.Name]; !found {
+				c.Issues = append(c.Issues, "Invalid cluster issuer.")
+			}
+		case "Issuer":
+			if _, found := issuers[c.C.Spec.IssuerRef.Name]; !found {
+				c.Issues = append(c.Issues, "Invalid issuer.")
+			}
+		}
 	}
 }
 
-func convert(items []certv1.Certificate) []cert {
-	var result []cert
+func convert(items []certv1.Certificate) []*cert {
+	var result []*cert
 
 	for _, c := range items {
-		result = append(result, cert{C: c})
+		result = append(result, &cert{C: c})
 	}
 
 	return result
 }
 
-func printCerts(certs []cert) {
+func printCerts(certs []*cert) {
 	w := tabwriter.NewWriter(os.Stdout, 5, 4, 3, ' ', 0)
-	_, _ = fmt.Fprintf(w, "NAMESPACE\tNAME\tREADY\tVALID FROM\tVALID TO\tISSUER\t\n")
+	_, _ = fmt.Fprintf(w, "NAMESPACE\tNAME\tREADY\tVALID FROM\tVALID TO\tISSUER\tISSUES\n")
 	for _, cert := range certs {
-		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t\n",
+		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t\n",
 			cert.C.Namespace,
 			cert.C.Name,
 			status(cert),
 			formatTime(cert.C.Status.NotBefore),
 			formatTime(cert.C.Status.NotAfter),
-			cert.C.Spec.IssuerRef.Name)
+			cert.C.Spec.IssuerRef.Name,
+			strings.Join(cert.Issues, " "))
 	}
 	_ = w.Flush()
 }
 
-func sortCerts(certList []cert, sortName, sortReady, sortIssuer, sortFrom, sortTo bool) {
-	var sortFunc func(a cert, b cert) int
+func sortCerts(certList []*cert, sortName, sortReady, sortIssuer, sortFrom, sortTo bool) {
+	var sortFunc func(a *cert, b *cert) int
 
 	switch {
 	case sortName:
-		sortFunc = func(a cert, b cert) int {
+		sortFunc = func(a *cert, b *cert) int {
 			return strings.Compare(a.C.Name, b.C.Name)
 		}
 	case sortReady:
-		sortFunc = func(a cert, b cert) int { return strings.Compare(status(a), status(b)) }
+		sortFunc = func(a *cert, b *cert) int { return strings.Compare(status(a), status(b)) }
 	case sortFrom:
-		sortFunc = func(a cert, b cert) int {
+		sortFunc = func(a *cert, b *cert) int {
 			if a.C.Status.NotBefore == nil {
 				return -1
 			} else if b.C.Status.NotBefore == nil {
@@ -166,7 +180,7 @@ func sortCerts(certList []cert, sortName, sortReady, sortIssuer, sortFrom, sortT
 			}
 		}
 	case sortTo:
-		sortFunc = func(a cert, b cert) int {
+		sortFunc = func(a *cert, b *cert) int {
 			if a.C.Status.NotAfter == nil {
 				return -1
 			} else if b.C.Status.NotAfter == nil {
@@ -178,7 +192,7 @@ func sortCerts(certList []cert, sortName, sortReady, sortIssuer, sortFrom, sortT
 			}
 		}
 	case sortIssuer:
-		sortFunc = func(a cert, b cert) int {
+		sortFunc = func(a *cert, b *cert) int {
 			return strings.Compare(a.C.Spec.IssuerRef.Name, b.C.Spec.IssuerRef.Name)
 		}
 	}
@@ -190,7 +204,7 @@ func sortCerts(certList []cert, sortName, sortReady, sortIssuer, sortFrom, sortT
 	slices.SortFunc(certList, sortFunc)
 }
 
-func status(cert cert) string {
+func status(cert *cert) string {
 	status := ""
 	for _, cond := range cert.C.Status.Conditions {
 		if cond.Type == certv1.CertificateConditionReady {
