@@ -14,6 +14,7 @@ func (c clients) GetCertificateRequestForCertificate(certificateName string, nam
 		return nil, err
 	}
 
+	var found *certv1.CertificateRequest
 	for _, crs := range crslist.Items {
 		if len(crs.OwnerReferences) == 0 {
 			continue
@@ -23,9 +24,11 @@ func (c clients) GetCertificateRequestForCertificate(certificateName string, nam
 			continue
 		}
 
-		return &crs, nil
+		if found == nil || crs.ObjectMeta.CreationTimestamp.After(found.ObjectMeta.CreationTimestamp.Time) {
+			found = &crs
+		}
 	}
-	return nil, nil
+	return found, nil
 }
 
 func (c clients) GetOrderForCertificateRequest(certificateRequestName string, namespace string) (*acmev1.Order, error) {
@@ -34,6 +37,7 @@ func (c clients) GetOrderForCertificateRequest(certificateRequestName string, na
 		return nil, err
 	}
 
+	var found *acmev1.Order
 	for _, order := range orderList.Items {
 		if len(order.OwnerReferences) == 0 {
 			continue
@@ -43,7 +47,9 @@ func (c clients) GetOrderForCertificateRequest(certificateRequestName string, na
 			continue
 		}
 
-		return &order, nil
+		if found == nil || order.ObjectMeta.CreationTimestamp.After(found.CreationTimestamp.Time) {
+			found = &order
+		}
 	}
-	return nil, nil
+	return found, nil
 }

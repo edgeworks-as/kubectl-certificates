@@ -5,6 +5,7 @@ package cmd
 
 import (
 	"fmt"
+	v12 "github.com/cert-manager/cert-manager/pkg/apis/meta/v1"
 	"kubectl-listcerts/internal"
 	"os"
 	"slices"
@@ -137,9 +138,17 @@ func validate(clients internal.Clients, certs []*cert, clusterIssuersList *certv
 				}
 				c.AddIssue(fmt.Sprintf("%s.", strings.Join(auths, " ")))
 			} else {
-				if len(crs.Status.Conditions) > 0 {
-					c.AddIssue(fmt.Sprintf("Certificate order status: %s.", crs.Status.Conditions[len(crs.Status.Conditions)-1].Message))
+				statusTrue := false
+				statusMessage := ""
+				for _, cond := range crs.Status.Conditions {
+					if cond.Type == certv1.CertificateRequestConditionReady {
+						statusTrue = cond.Status == v12.ConditionTrue
+						statusMessage = cond.Message
+						break
+					}
 				}
+
+				c.AddIssue(fmt.Sprintf("Certificate request status: %t: %s.", statusTrue, statusMessage))
 			}
 		}
 
