@@ -59,6 +59,11 @@ func init() {
 	listCmd.MarkFlagsMutuallyExclusive("name", "ready", "from", "to", "issuer")
 }
 
+type cert struct {
+	C        certv1.Certificate
+	Comments []string
+}
+
 func list() {
 	certClient, err := getCertmanagerClient()
 	if err != nil {
@@ -77,66 +82,104 @@ func list() {
 		sortName = true
 	}
 
+	clusterIssuerList, err := certClient.ClusterIssuers().List(context.Background(), v1.ListOptions{})
+	if err != nil {
+		panic(err)
+	}
+
+	issuerList, err := certClient.Issuers(ns).List(context.Background(), v1.ListOptions{})
+	if err != nil {
+		panic(err)
+	}
+
 	certList, err := certClient.Certificates(ns).List(context.Background(), v1.ListOptions{})
-	certs := certList.Items
+	if err != nil {
+		panic(err)
+	}
+	certs := convert(certList.Items)
+
+	validate(certs, clusterIssuerList, issuerList)
+
 	sortCerts(certs, sortName, sortReady, sortIssuer, sortFrom, sortTo)
 	printCerts(certs)
 }
 
-func printCerts(certs []certv1.Certificate) {
+func validate(certs []cert, issuerList *certv1.ClusterIssuerList, issuerList2 *certv1.IssuerList) {
+
+	var clusterIssuers map[string]*certv1.ClusterIssuer
+	var issuers map[string]*certv1.Issuer
+
+	for _, iss := range issuerList {
+		issuers[is]
+	}
+
+	for _, c := range certs {
+
+	}
+}
+
+func convert(items []certv1.Certificate) []cert {
+	var result []cert
+
+	for _, c := range items {
+		result = append(result, cert{C: c})
+	}
+
+	return result
+}
+
+func printCerts(certs []cert) {
 	w := tabwriter.NewWriter(os.Stdout, 5, 4, 3, ' ', 0)
 	_, _ = fmt.Fprintf(w, "NAMESPACE\tNAME\tREADY\tVALID FROM\tVALID TO\tISSUER\t\n")
 	for _, cert := range certs {
 		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t\n",
-			cert.Namespace,
-			cert.Name,
+			cert.C.Namespace,
+			cert.C.Name,
 			status(cert),
-			formatTime(cert.Status.NotBefore),
-			formatTime(cert.Status.NotAfter),
-			cert.Spec.IssuerRef.Name)
+			formatTime(cert.C.Status.NotBefore),
+			formatTime(cert.C.Status.NotAfter),
+			cert.C.Spec.IssuerRef.Name)
 	}
 	_ = w.Flush()
 }
 
-func sortCerts(certList []certv1.Certificate, sortName, sortReady, sortIssuer, sortFrom, sortTo bool) {
-	var sortFunc func(a certv1.Certificate, b certv1.Certificate) int
+func sortCerts(certList []cert, sortName, sortReady, sortIssuer, sortFrom, sortTo bool) {
+	var sortFunc func(a cert, b cert) int
 
 	switch {
 	case sortName:
-		sortFunc = func(a certv1.Certificate, b certv1.Certificate) int {
-			return strings.Compare(a.Name, b.Name)
+		sortFunc = func(a cert, b cert) int {
+			return strings.Compare(a.C.Name, b.C.Name)
 		}
 	case sortReady:
-		sortFunc = func(a certv1.Certificate, b certv1.Certificate) int {
-			return strings.Compare(status(a), status(b))
-		}
+		sortFunc = func(a cert, b cert) int { return strings.Compare(status(a), status(b)) }
 	case sortFrom:
-		sortFunc = func(a certv1.Certificate, b certv1.Certificate) int {
-			if a.Status.NotBefore == nil {
+		sortFunc = func(a cert, b cert) int {
+			if a.C.Status.NotBefore == nil {
 				return -1
-			} else if b.Status.NotBefore == nil {
+			} else if b.C.Status.NotBefore == nil {
 				return 1
-			} else if a.Status.NotBefore.Before(b.Status.NotBefore) {
+			} else if a.C.Status.NotBefore.Before(b.C.Status.NotBefore) {
 				return -1
 			} else {
 				return 1
 			}
 		}
 	case sortTo:
-		sortFunc = func(a certv1.Certificate, b certv1.Certificate) int {
-			if a.Status.NotAfter == nil {
+		sortFunc = func(a cert, b cert) int {
+			if a.C.Status.NotAfter == nil {
 				return -1
-			} else if b.Status.NotAfter == nil {
+			} else if b.C.Status.NotAfter == nil {
 				return 1
-			} else if a.Status.NotAfter.Before(b.Status.NotAfter) {
+			} else if a.C.Status.NotAfter.Before(b.C.Status.NotAfter) {
 				return -1
 			} else {
 				return 1
 			}
 		}
 	case sortIssuer:
-		sortFunc = func(a certv1.Certificate, b certv1.Certificate) int {
-			return strings.Compare(a.Spec.IssuerRef.Name, b.Spec.IssuerRef.Name)
+		sortFunc = func(a cert, b cert) int {
+			return strings.Compare(a.C.Spec.IssuerRef.Name, b.C.Spec.IssuerRef.Name)
 		}
 	}
 
@@ -147,9 +190,9 @@ func sortCerts(certList []certv1.Certificate, sortName, sortReady, sortIssuer, s
 	slices.SortFunc(certList, sortFunc)
 }
 
-func status(cert certv1.Certificate) string {
+func status(cert cert) string {
 	status := ""
-	for _, cond := range cert.Status.Conditions {
+	for _, cond := range cert.C.Status.Conditions {
 		if cond.Type == certv1.CertificateConditionReady {
 			status = string(cond.Status)
 			break
