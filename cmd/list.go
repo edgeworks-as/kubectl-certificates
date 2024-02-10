@@ -5,22 +5,16 @@ package cmd
 
 import (
 	"fmt"
+	"kubectl-listcerts/internal"
 	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 	"text/tabwriter"
 	"time"
 
 	certv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
-	certclient "github.com/cert-manager/cert-manager/pkg/client/clientset/versioned/typed/certmanager/v1"
-	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/rest"
-	"k8s.io/client-go/tools/clientcmd"
-	"k8s.io/client-go/util/homedir"
-
 	"github.com/spf13/cobra"
+	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"context"
 )
@@ -59,18 +53,14 @@ func init() {
 	listCmd.MarkFlagsMutuallyExclusive("name", "ready", "from", "to", "issuer")
 }
 
-type cert struct {
-	C      certv1.Certificate
-	Issues []string
-}
-
 func list() {
-	certClient, err := getCertmanagerClient()
+	clients, err := internal.NewClient()
 	if err != nil {
-		panic(err)
+		fmt.Println("ERROR: %w\n", err)
+		return
 	}
 
-	ns := getCurrentNamespace()
+	ns := clients.CurrentNamespace()
 	if namespace != "" {
 		ns = namespace
 	}
@@ -82,29 +72,29 @@ func list() {
 		sortName = true
 	}
 
-	clusterIssuerList, err := certClient.ClusterIssuers().List(context.Background(), v1.ListOptions{})
+	clusterIssuerList, err := clients.CertManagerClient().ClusterIssuers().List(context.Background(), v1.ListOptions{})
 	if err != nil {
 		panic(err)
 	}
 
-	issuerList, err := certClient.Issuers(ns).List(context.Background(), v1.ListOptions{})
+	issuerList, err := clients.CertManagerClient().Issuers(ns).List(context.Background(), v1.ListOptions{})
 	if err != nil {
 		panic(err)
 	}
 
-	certList, err := certClient.Certificates(ns).List(context.Background(), v1.ListOptions{})
+	certList, err := clients.CertManagerClient().Certificates(ns).List(context.Background(), v1.ListOptions{})
 	if err != nil {
 		panic(err)
 	}
 	certs := convert(certList.Items)
 
-	validate(certs, clusterIssuerList, issuerList)
+	validate(clients, certs, clusterIssuerList, issuerList)
 
-	sortCerts(certs, sortName, sortReady, sortIssuer, sortFrom, sortTo)
-	printCerts(certs)
+	sort(certs, sortName, sortReady, sortIssuer, sortFrom, sortTo)
+	printCertificatesList(certs)
 }
 
-func validate(certs []*cert, clusterIssuersList *certv1.ClusterIssuerList, issuersList *certv1.IssuerList) {
+func validate(clients internal.Clients, certs []*cert, clusterIssuersList *certv1.ClusterIssuerList, issuersList *certv1.IssuerList) error {
 
 	clusterIssuers := make(map[string]*certv1.ClusterIssuer)
 	issuers := make(map[string]*certv1.Issuer)
@@ -121,14 +111,40 @@ func validate(certs []*cert, clusterIssuersList *certv1.ClusterIssuerList, issue
 		switch c.C.Spec.IssuerRef.Kind {
 		case "ClusterIssuer":
 			if _, found := clusterIssuers[c.C.Spec.IssuerRef.Name]; !found {
-				c.Issues = append(c.Issues, "Invalid cluster issuer.")
+				c.AddIssue("Unknown cluster issuer.")
 			}
 		case "Issuer":
 			if _, found := issuers[c.C.Spec.IssuerRef.Name]; !found {
-				c.Issues = append(c.Issues, "Invalid issuer.")
+				c.AddIssue("Unknown issuer.")
 			}
 		}
+
+		// Check for pending orders
+		crs, err := clients.GetCertificateRequestForCertificate(c.C.Name, c.C.Namespace)
+		if err != nil {
+			return err
+		}
+		if crs != nil {
+			order, err := clients.GetOrderForCertificateRequest(crs.Name, crs.Namespace)
+			if err != nil {
+				return err
+			}
+			if order != nil {
+				c.AddIssue(fmt.Sprintf("Order status: %s.", order.Status.State))
+				auths := []string{"Authorizations:"}
+				for _, auth := range order.Status.Authorizations {
+					auths = append(auths, fmt.Sprintf("%s: %s", auth.Identifier, auth.InitialState))
+				}
+				c.AddIssue(fmt.Sprintf("%s.", strings.Join(auths, " ")))
+			} else {
+				if len(crs.Status.Conditions) > 0 {
+					c.AddIssue(fmt.Sprintf("Certificate order status: %s.", crs.Status.Conditions[len(crs.Status.Conditions)-1].Message))
+				}
+			}
+		}
+
 	}
+	return nil
 }
 
 func convert(items []certv1.Certificate) []*cert {
@@ -141,14 +157,14 @@ func convert(items []certv1.Certificate) []*cert {
 	return result
 }
 
-func printCerts(certs []*cert) {
+func printCertificatesList(certs []*cert) {
 	w := tabwriter.NewWriter(os.Stdout, 5, 4, 3, ' ', 0)
 	_, _ = fmt.Fprintf(w, "NAMESPACE\tNAME\tREADY\tVALID FROM\tVALID TO\tISSUER\tISSUES\n")
 	for _, cert := range certs {
 		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t\n",
 			cert.C.Namespace,
 			cert.C.Name,
-			status(cert),
+			cert.Status(),
 			formatTime(cert.C.Status.NotBefore),
 			formatTime(cert.C.Status.NotAfter),
 			cert.C.Spec.IssuerRef.Name,
@@ -157,7 +173,7 @@ func printCerts(certs []*cert) {
 	_ = w.Flush()
 }
 
-func sortCerts(certList []*cert, sortName, sortReady, sortIssuer, sortFrom, sortTo bool) {
+func sort(certList []*cert, sortName, sortReady, sortIssuer, sortFrom, sortTo bool) {
 	var sortFunc func(a *cert, b *cert) int
 
 	switch {
@@ -166,7 +182,7 @@ func sortCerts(certList []*cert, sortName, sortReady, sortIssuer, sortFrom, sort
 			return strings.Compare(a.C.Name, b.C.Name)
 		}
 	case sortReady:
-		sortFunc = func(a *cert, b *cert) int { return strings.Compare(status(a), status(b)) }
+		sortFunc = func(a *cert, b *cert) int { return strings.Compare(a.Status(), b.Status()) }
 	case sortFrom:
 		sortFunc = func(a *cert, b *cert) int {
 			if a.C.Status.NotBefore == nil {
@@ -199,20 +215,8 @@ func sortCerts(certList []*cert, sortName, sortReady, sortIssuer, sortFrom, sort
 
 	if sortFunc == nil {
 		panic("sort func not set")
-		return
 	}
 	slices.SortFunc(certList, sortFunc)
-}
-
-func status(cert *cert) string {
-	status := ""
-	for _, cond := range cert.C.Status.Conditions {
-		if cond.Type == certv1.CertificateConditionReady {
-			status = string(cond.Status)
-			break
-		}
-	}
-	return status
 }
 
 func formatTime(t *v1.Time) string {
@@ -222,42 +226,22 @@ func formatTime(t *v1.Time) string {
 	return t.Format(time.RFC3339)
 }
 
-func getConfig() (*rest.Config, error) {
-	return clientcmd.BuildConfigFromFlags("", filepath.Join(homedir.HomeDir(), ".kube", "config"))
+type cert struct {
+	C      certv1.Certificate
+	Issues []string
 }
 
-func getCurrentNamespace() string {
-	cfg, err := clientcmd.LoadFromFile(filepath.Join(homedir.HomeDir(), ".kube", "config"))
-	if err != nil {
-		return "default"
-	}
-
-	ns := cfg.Contexts[cfg.CurrentContext].Namespace
-	if len(ns) == 0 {
-		return "default"
-	}
-
-	return ns
+func (c *cert) AddIssue(issue string) {
+	c.Issues = append(c.Issues, issue)
 }
 
-func getCoreClient() (*kubernetes.Clientset, error) {
-
-	config, err := getConfig()
-	if err != nil {
-		return nil, err
+func (c *cert) Status() string {
+	status := ""
+	for _, cond := range c.C.Status.Conditions {
+		if cond.Type == certv1.CertificateConditionReady {
+			status = string(cond.Status)
+			break
+		}
 	}
-
-	// create the core clientset
-	return kubernetes.NewForConfig(config)
-}
-
-func getCertmanagerClient() (*certclient.CertmanagerV1Client, error) {
-
-	config, err := getConfig()
-	if err != nil {
-		return nil, err
-	}
-
-	// create the cert manager clientset
-	return certclient.NewForConfig(config)
+	return status
 }

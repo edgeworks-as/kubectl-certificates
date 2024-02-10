@@ -12,7 +12,7 @@ import (
 func Test_sortCerts(t *testing.T) {
 
 	type args struct {
-		certList             []certv1.Certificate
+		certList             []*cert
 		sortName             bool
 		sortReady            bool
 		sortIssuer           bool
@@ -75,59 +75,65 @@ func Test_sortCerts(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			sortCerts(tt.args.certList, tt.args.sortName, tt.args.sortReady, tt.args.sortIssuer, tt.args.sortFrom, tt.args.sortTo)
+			sort(tt.args.certList, tt.args.sortName, tt.args.sortReady, tt.args.sortIssuer, tt.args.sortFrom, tt.args.sortTo)
 			if len(tt.args.certList) != len(tt.args.expectedOrderOfNames) {
 				t.Error(fmt.Sprintf("sorted list length not equals to expected names list: %d != %d", len(tt.args.certList), len(tt.args.expectedOrderOfNames)))
 			}
 			for i, n := range tt.args.expectedOrderOfNames {
-				if n != tt.args.certList[i].Name {
-					t.Error(fmt.Errorf("element %d name %s != expected name %s", i, tt.args.certList[9].Name, n))
+				if n != tt.args.certList[i].C.Name {
+					t.Error(fmt.Errorf("element %d name %s != expected name %s", i, tt.args.certList[9].C.Name, n))
 				}
-				fmt.Printf("Cert: %s\n", tt.args.certList[i].Name)
+				fmt.Printf("Cert: %s\n", tt.args.certList[i].C.Name)
 			}
 		})
 	}
 }
 
-func createCerts() []certv1.Certificate {
-	return []certv1.Certificate{
+func createCerts() []*cert {
+	return []*cert{
 		{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: "c",
-			},
-			Spec: certv1.CertificateSpec{
-				IssuerRef: v1.ObjectReference{
-					Name: "issuerc",
+			C: certv1.Certificate{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "c",
 				},
-			},
-			Status: certv1.CertificateStatus{
-				NotBefore: createTime(-3),
+				Spec: certv1.CertificateSpec{
+					IssuerRef: v1.ObjectReference{
+						Name: "issuerc",
+					},
+				},
+				Status: certv1.CertificateStatus{
+					NotBefore: createTime(-3),
+				},
 			},
 		},
 		{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: "b",
-			},
-			Spec: certv1.CertificateSpec{
-				IssuerRef: v1.ObjectReference{
-					Name: "issuerb",
+			C: certv1.Certificate{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "b",
 				},
-			},
-			Status: certv1.CertificateStatus{
-				NotBefore: createTime(-2),
+				Spec: certv1.CertificateSpec{
+					IssuerRef: v1.ObjectReference{
+						Name: "issuerb",
+					},
+				},
+				Status: certv1.CertificateStatus{
+					NotBefore: createTime(-2),
+				},
 			},
 		},
 		{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: "a",
-			},
-			Spec: certv1.CertificateSpec{
-				IssuerRef: v1.ObjectReference{
-					Name: "issuera",
+			C: certv1.Certificate{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "a",
 				},
-			},
-			Status: certv1.CertificateStatus{
-				NotBefore: createTime(-1),
+				Spec: certv1.CertificateSpec{
+					IssuerRef: v1.ObjectReference{
+						Name: "issuera",
+					},
+				},
+				Status: certv1.CertificateStatus{
+					NotBefore: createTime(-1),
+				},
 			},
 		},
 	}
