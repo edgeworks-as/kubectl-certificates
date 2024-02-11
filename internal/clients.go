@@ -18,7 +18,7 @@ type Clients interface {
 	AcmeClient() *acmeclient.AcmeV1Client
 
 	GetCertificateRequestForCertificate(cert *certv1.Certificate) (*certv1.CertificateRequest, error)
-	GetOrderForCertificateRequest(certificateRequestName string, namespace string) (*acmev1.Order, error)
+	GetOrderForCertificateRequest(crs *certv1.CertificateRequest) (*acmev1.Order, error)
 }
 
 type clients struct {

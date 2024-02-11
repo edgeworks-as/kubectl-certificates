@@ -15,7 +15,8 @@ func (c clients) GetCertificateRequestForCertificate(cert *certv1.Certificate) (
 	}
 
 	var found *certv1.CertificateRequest
-	for _, crs := range crslist.Items {
+	for i, _ := range crslist.Items {
+		crs := crslist.Items[i]
 		if len(crs.OwnerReferences) == 0 {
 			continue
 		}
@@ -33,24 +34,27 @@ func (c clients) GetCertificateRequestForCertificate(cert *certv1.Certificate) (
 	return found, nil
 }
 
-func (c clients) GetOrderForCertificateRequest(certificateRequestName string, namespace string) (*acmev1.Order, error) {
-	orderList, err := c.AcmeClient().Orders(namespace).List(context.Background(), v1.ListOptions{})
+func (c clients) GetOrderForCertificateRequest(crs *certv1.CertificateRequest) (*acmev1.Order, error) {
+	orderList, err := c.AcmeClient().Orders(crs.Namespace).List(context.Background(), v1.ListOptions{})
 	if err != nil {
 		return nil, err
 	}
 
 	var found *acmev1.Order
-	for _, order := range orderList.Items {
+	for i, _ := range orderList.Items {
+		order := orderList.Items[i]
 		if len(order.OwnerReferences) == 0 {
 			continue
 		}
 
-		if order.OwnerReferences[0].Kind != "CertificateRequest" || order.OwnerReferences[0].Name != certificateRequestName {
+		if order.OwnerReferences[0].Kind != "CertificateRequest" {
 			continue
 		}
 
-		if found == nil || order.ObjectMeta.CreationTimestamp.After(found.CreationTimestamp.Time) {
-			found = &order
+		if order.OwnerReferences[0].Name == crs.Name && order.OwnerReferences[0].UID == crs.UID {
+			if found == nil || order.ObjectMeta.CreationTimestamp.After(found.CreationTimestamp.Time) {
+				found = &order
+			}
 		}
 	}
 	return found, nil

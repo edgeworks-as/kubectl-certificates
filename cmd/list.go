@@ -114,7 +114,9 @@ func validate(clients internal.Clients, certs []*cert, clusterIssuersList *certv
 		issuers[fmt.Sprintf("%s/%s", iss.Namespace, iss.Name)] = &iss
 	}
 
-	for _, c := range certs {
+	for i, _ := range certs {
+		c := certs[i]
+
 		switch c.C.Spec.IssuerRef.Kind {
 		case "ClusterIssuer":
 			if _, found := clusterIssuers[c.C.Spec.IssuerRef.Name]; !found {
@@ -132,7 +134,7 @@ func validate(clients internal.Clients, certs []*cert, clusterIssuersList *certv
 			return err
 		}
 		if crs != nil {
-			order, err := clients.GetOrderForCertificateRequest(crs.Name, crs.Namespace)
+			order, err := clients.GetOrderForCertificateRequest(crs)
 			if err != nil {
 				return err
 			}
@@ -159,7 +161,7 @@ func validate(clients internal.Clients, certs []*cert, clusterIssuersList *certv
 				}
 
 				if !statusTrue {
-					c.AddIssue(fmt.Sprintf("Certificate request status: %t: %s.", statusTrue, statusMessage))
+					c.AddIssue(fmt.Sprintf("Certificate request status: %s: %s: %t: %s.", c.C.Name, crs.Name, statusTrue, statusMessage))
 				}
 			}
 		}
@@ -171,7 +173,8 @@ func validate(clients internal.Clients, certs []*cert, clusterIssuersList *certv
 func convert(items []certv1.Certificate) []*cert {
 	var result []*cert
 
-	for _, c := range items {
+	for i, _ := range items {
+		c := items[i]
 		result = append(result, &cert{C: c})
 	}
 
