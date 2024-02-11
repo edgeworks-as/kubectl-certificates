@@ -131,12 +131,16 @@ func validate(clients internal.Clients, certs []*cert, clusterIssuersList *certv
 				return err
 			}
 			if order != nil {
-				c.AddIssue(fmt.Sprintf("Order status: %s.", order.Status.State))
-				auths := []string{"Authorizations:"}
-				for _, auth := range order.Status.Authorizations {
-					auths = append(auths, fmt.Sprintf("%s: %s", auth.Identifier, auth.InitialState))
+				if len(order.Status.Certificate) == 0 {
+					c.AddIssue(fmt.Sprintf("Order status: %s.", order.Status.State))
+					auths := []string{}
+					for _, auth := range order.Status.Authorizations {
+						if auth.Identifier != "" {
+							auths = append(auths, auth.Identifier)
+						}
+					}
+					c.AddIssue(fmt.Sprintf("Authorizations: %s.", strings.Join(auths, ",")))
 				}
-				c.AddIssue(fmt.Sprintf("%s.", strings.Join(auths, " ")))
 			} else {
 				statusTrue := false
 				statusMessage := ""
@@ -148,7 +152,9 @@ func validate(clients internal.Clients, certs []*cert, clusterIssuersList *certv
 					}
 				}
 
-				c.AddIssue(fmt.Sprintf("Certificate request status: %t: %s.", statusTrue, statusMessage))
+				if !statusTrue {
+					c.AddIssue(fmt.Sprintf("Certificate request status: %t: %s.", statusTrue, statusMessage))
+				}
 			}
 		}
 
