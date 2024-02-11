@@ -7,9 +7,9 @@ import (
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-func (c clients) GetCertificateRequestForCertificate(certificateName string, namespace string) (*certv1.CertificateRequest, error) {
+func (c clients) GetCertificateRequestForCertificate(cert *certv1.Certificate) (*certv1.CertificateRequest, error) {
 	// Find certificate request matching the cert
-	crslist, err := c.CertManagerClient().CertificateRequests(namespace).List(context.Background(), v1.ListOptions{})
+	crslist, err := c.CertManagerClient().CertificateRequests(cert.Namespace).List(context.Background(), v1.ListOptions{})
 	if err != nil {
 		return nil, err
 	}
@@ -20,12 +20,14 @@ func (c clients) GetCertificateRequestForCertificate(certificateName string, nam
 			continue
 		}
 
-		if crs.OwnerReferences[0].Kind != "Certificate" || crs.OwnerReferences[0].Name != certificateName {
+		if crs.OwnerReferences[0].Kind != "Certificate" {
 			continue
 		}
 
-		if found == nil || crs.ObjectMeta.CreationTimestamp.After(found.ObjectMeta.CreationTimestamp.Time) {
-			found = &crs
+		if crs.OwnerReferences[0].Name == cert.Name && crs.OwnerReferences[0].UID == cert.UID {
+			if found == nil || crs.ObjectMeta.CreationTimestamp.After(found.ObjectMeta.CreationTimestamp.Time) {
+				found = &crs
+			}
 		}
 	}
 	return found, nil

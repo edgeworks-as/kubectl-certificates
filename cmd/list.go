@@ -73,23 +73,29 @@ func list() {
 		sortName = true
 	}
 
+	certList, err := clients.CertManagerClient().Certificates(ns).List(context.Background(), v1.ListOptions{})
+	if err != nil {
+		fmt.Printf("Error: %s\n", err)
+		return
+	}
+	certs := convert(certList.Items)
+
 	clusterIssuerList, err := clients.CertManagerClient().ClusterIssuers().List(context.Background(), v1.ListOptions{})
 	if err != nil {
-		panic(err)
+		fmt.Printf("Error: %s\n", err)
+		return
 	}
 
 	issuerList, err := clients.CertManagerClient().Issuers(ns).List(context.Background(), v1.ListOptions{})
 	if err != nil {
-		panic(err)
+		fmt.Printf("Error: %s\n", err)
+		return
 	}
 
-	certList, err := clients.CertManagerClient().Certificates(ns).List(context.Background(), v1.ListOptions{})
-	if err != nil {
-		panic(err)
+	if err := validate(clients, certs, clusterIssuerList, issuerList); err != nil {
+		fmt.Printf("Error: %s\n", err)
+		return
 	}
-	certs := convert(certList.Items)
-
-	validate(clients, certs, clusterIssuerList, issuerList)
 
 	sort(certs, sortName, sortReady, sortIssuer, sortFrom, sortTo)
 	printCertificatesList(certs)
@@ -105,7 +111,7 @@ func validate(clients internal.Clients, certs []*cert, clusterIssuersList *certv
 	}
 
 	for _, iss := range issuersList.Items {
-		issuers[iss.Name] = &iss
+		issuers[fmt.Sprintf("%s/%s", iss.Namespace, iss.Name)] = &iss
 	}
 
 	for _, c := range certs {
@@ -115,13 +121,13 @@ func validate(clients internal.Clients, certs []*cert, clusterIssuersList *certv
 				c.AddIssue("Unknown cluster issuer.")
 			}
 		case "Issuer":
-			if _, found := issuers[c.C.Spec.IssuerRef.Name]; !found {
+			if _, found := issuers[fmt.Sprintf("%s/%s", c.C.Namespace, c.C.Spec.IssuerRef.Name)]; !found {
 				c.AddIssue("Unknown issuer.")
 			}
 		}
 
 		// Check for pending orders
-		crs, err := clients.GetCertificateRequestForCertificate(c.C.Name, c.C.Namespace)
+		crs, err := clients.GetCertificateRequestForCertificate(&c.C)
 		if err != nil {
 			return err
 		}

@@ -17,7 +17,7 @@ type Clients interface {
 	CertManagerClient() *certclient.CertmanagerV1Client
 	AcmeClient() *acmeclient.AcmeV1Client
 
-	GetCertificateRequestForCertificate(certName string, certNamespace string) (*certv1.CertificateRequest, error)
+	GetCertificateRequestForCertificate(cert *certv1.Certificate) (*certv1.CertificateRequest, error)
 	GetOrderForCertificateRequest(certificateRequestName string, namespace string) (*acmev1.Order, error)
 }
 
