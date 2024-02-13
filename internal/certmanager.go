@@ -59,3 +59,27 @@ func (c clients) GetOrderForCertificateRequest(crs *certv1.CertificateRequest) (
 	}
 	return found, nil
 }
+
+func (c clients) GetChallengesForOrder(order *acmev1.Order) ([]*acmev1.Challenge, error) {
+	challengeList, err := c.AcmeClient().Challenges(order.Namespace).List(context.Background(), v1.ListOptions{})
+	if err != nil {
+		return nil, err
+	}
+
+	var challenges []*acmev1.Challenge
+	for i, _ := range challengeList.Items {
+		chall := challengeList.Items[i]
+		if len(chall.OwnerReferences) == 0 {
+			continue
+		}
+
+		if chall.OwnerReferences[0].Kind != "Order" {
+			continue
+		}
+
+		if chall.OwnerReferences[0].Name == order.Name && chall.OwnerReferences[0].UID == order.UID {
+			challenges = append(challenges, &chall)
+		}
+	}
+	return challenges, nil
+}

@@ -19,6 +19,7 @@ type Clients interface {
 
 	GetCertificateRequestForCertificate(cert *certv1.Certificate) (*certv1.CertificateRequest, error)
 	GetOrderForCertificateRequest(crs *certv1.CertificateRequest) (*acmev1.Order, error)
+	GetChallengesForOrder(order *acmev1.Order) ([]*acmev1.Challenge, error)
 }
 
 type clients struct {

@@ -5,8 +5,10 @@ package cmd
 
 import (
 	"fmt"
-	v12 "github.com/cert-manager/cert-manager/pkg/apis/meta/v1"
+	acmev1 "github.com/cert-manager/cert-manager/pkg/apis/acme/v1"
+	metav1 "github.com/cert-manager/cert-manager/pkg/apis/meta/v1"
 	"kubectl-listcerts/internal"
+	"net"
 	"os"
 	"slices"
 	"strings"
@@ -140,21 +142,45 @@ func validate(clients internal.Clients, certs []*cert, clusterIssuersList *certv
 			}
 			if order != nil {
 				if len(order.Status.Certificate) == 0 {
-					c.AddIssue(fmt.Sprintf("Order status: %s.", order.Status.State))
-					auths := []string{}
-					for _, auth := range order.Status.Authorizations {
-						if auth.Identifier != "" {
-							auths = append(auths, auth.Identifier)
-						}
+					chall, err := clients.GetChallengesForOrder(order)
+					c.AddIssue(fmt.Sprintf("Order status: %s. Challenges: %d.", order.Status.State, len(chall)))
+					if err != nil {
+						return err
 					}
-					c.AddIssue(fmt.Sprintf("Authorizations: %s.", strings.Join(auths, ",")))
+					if len(chall) > 0 {
+						for _, chall := range chall {
+							if chall.Status.State == acmev1.Pending {
+								if strings.Contains(chall.Status.Reason, "not yet propagated") && chall.Spec.Solver.DNS01 != nil && chall.Spec.Solver.DNS01.AzureDNS != nil {
+									subdomain := strings.ReplaceAll(chall.Spec.DNSName, chall.Spec.Solver.DNS01.AzureDNS.HostedZoneName, "")
+									domainPaths := strings.Split(subdomain, ".")
+									if len(domainPaths) > 1 {
+										cname := fmt.Sprintf("_acme-challenge.%s", chall.Spec.DNSName)
+										adr, err := net.LookupCNAME(cname)
+										if err != nil {
+											c.AddIssue(fmt.Sprintf("%s: %s%s", cname, adr, err))
+										}
+									}
+								} else {
+									c.AddIssue(fmt.Sprintf("Challenge status: %s.", chall.Status.Reason))
+								}
+							}
+						}
+					} else {
+						auths := []string{}
+						for _, auth := range order.Status.Authorizations {
+							if auth.Identifier != "" {
+								auths = append(auths, auth.Identifier)
+							}
+						}
+						c.AddIssue(fmt.Sprintf("Authorizations: %s.", strings.Join(auths, ",")))
+					}
 				}
 			} else {
 				statusTrue := false
 				statusMessage := ""
 				for _, cond := range crs.Status.Conditions {
 					if cond.Type == certv1.CertificateRequestConditionReady {
-						statusTrue = cond.Status == v12.ConditionTrue
+						statusTrue = cond.Status == metav1.ConditionTrue
 						statusMessage = cond.Message
 						break
 					}
