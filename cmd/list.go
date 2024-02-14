@@ -7,8 +7,11 @@ import (
 	"fmt"
 	acmev1 "github.com/cert-manager/cert-manager/pkg/apis/acme/v1"
 	metav1 "github.com/cert-manager/cert-manager/pkg/apis/meta/v1"
+	"io"
+	"k8s.io/apimachinery/pkg/util/json"
 	"kubectl-listcerts/internal"
 	"net"
+	"net/http"
 	"os"
 	"slices"
 	"strings"
@@ -122,11 +125,11 @@ func validate(clients internal.Clients, certs []*cert, clusterIssuersList *certv
 		switch c.C.Spec.IssuerRef.Kind {
 		case "ClusterIssuer":
 			if _, found := clusterIssuers[c.C.Spec.IssuerRef.Name]; !found {
-				c.AddIssue("Unknown cluster issuer.")
+				c.AddIssue("Wrong cluster issuer.")
 			}
 		case "Issuer":
 			if _, found := issuers[fmt.Sprintf("%s/%s", c.C.Namespace, c.C.Spec.IssuerRef.Name)]; !found {
-				c.AddIssue("Unknown issuer.")
+				c.AddIssue("Wrong issuer.")
 			}
 		}
 
@@ -143,11 +146,11 @@ func validate(clients internal.Clients, certs []*cert, clusterIssuersList *certv
 			if order != nil {
 				if len(order.Status.Certificate) == 0 {
 					chall, err := clients.GetChallengesForOrder(order)
-					c.AddIssue(fmt.Sprintf("Order status: %s. Challenges: %d.", order.Status.State, len(chall)))
 					if err != nil {
 						return err
 					}
 					if len(chall) > 0 {
+						c.AddIssue(fmt.Sprintf("Order status: %s.", order.Status.State))
 						for _, chall := range chall {
 							if chall.Status.State == acmev1.Pending {
 								if strings.Contains(chall.Status.Reason, "not yet propagated") && chall.Spec.Solver.DNS01 != nil && chall.Spec.Solver.DNS01.AzureDNS != nil {
@@ -155,9 +158,9 @@ func validate(clients internal.Clients, certs []*cert, clusterIssuersList *certv
 									domainPaths := strings.Split(subdomain, ".")
 									if len(domainPaths) > 1 {
 										cname := fmt.Sprintf("_acme-challenge.%s", chall.Spec.DNSName)
-										adr, err := net.LookupCNAME(cname)
+										_, err := net.LookupCNAME(cname)
 										if err != nil {
-											c.AddIssue(fmt.Sprintf("%s: %s%s", cname, adr, err))
+											c.AddIssue(fmt.Sprintf("CNAME %s: missing", cname))
 										}
 									}
 								} else {
@@ -172,7 +175,7 @@ func validate(clients internal.Clients, certs []*cert, clusterIssuersList *certv
 								auths = append(auths, auth.Identifier)
 							}
 						}
-						c.AddIssue(fmt.Sprintf("Authorizations: %s.", strings.Join(auths, ",")))
+						c.AddIssue(fmt.Sprintf("ACME order status: %s. Authorizations: %s, but 0 active challenges.", getAcmeOrderStatus(order), strings.Join(auths, ",")))
 					}
 				}
 			} else {
@@ -194,6 +197,32 @@ func validate(clients internal.Clients, certs []*cert, clusterIssuersList *certv
 
 	}
 	return nil
+}
+
+func getAcmeOrderStatus(order *acmev1.Order) string {
+	if order.Status.URL == "" {
+		return "<unknown order status URL>"
+	}
+
+	resp, err := http.DefaultClient.Get(order.Status.URL)
+	if err != nil {
+		return fmt.Sprintf("<unable to fetch order status: %s", err)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil || len(body) == 0 {
+		return fmt.Sprintf("<unable to fetch order status: %s", err)
+	}
+
+	var respJson struct {
+		Status  int    `json:"status"`
+		Detail  string `json:"detail"`
+		Expires string `json:"expires"`
+	}
+	if err := json.Unmarshal(body, &respJson); err != nil {
+		return fmt.Sprintf("<unable to fetch order status: %s", err)
+	}
+	return fmt.Sprintf("%d - %s", respJson.Status, respJson.Detail)
 }
 
 func convert(items []certv1.Certificate) []*cert {
